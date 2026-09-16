@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Урок - исследование №2. Тема: «Проверка гипотезы: дальность полёта шарика, пущенного горизонтально, тем больше, чем больше высота пуска»</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body {
+      background: #0f172a;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .container {
+      width: 100%;
+      max-width: 860px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .header {
+      text-align: center;
+    }
+    .header .lesson-title {
+      font-size: 1.15rem;
+      font-weight: 400;
+      color: #cbd5e1;
+    }
+    .header .theme-bold {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #f8fafc;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+    canvas {
+      width: 100%;
+      height: 400px;
+      background: #f8fafc;
+      border-radius: 16px;
+      border: 2px solid #334155;
+      display: block;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+    .controls {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 14px;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    .slider-box {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex: 1;
+      min-width: 250px;
+      font-size: 0.9rem;
+      font-weight: 700;
+    }
+    input[type=range] {
+      flex: 1;
+      accent-color: #8b5cf6;
+      cursor: pointer;
+    }
+    .res-box {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #cbd5e1;
+    }
+    .res-box span {
+      color: #4ade80;
+      font-size: 1.2rem;
+      font-weight: 800;
+      margin-left: 4px;
+    }
+    button {
+      background: #8b5cf6;
+      color: #fff;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4);
+      transition: 0.2s;
+    }
+    button:hover { background: #7c3aed; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <div class="lesson-title">Урок - исследование №2</div>
+    <div class="theme-bold">Тема: «Проверка гипотезы: дальность полёта шарика, пущенного горизонтально, тем больше, чем больше высота пуска»</div>
+  </div>
+
+  <canvas id="canvas"></canvas>
+
+  <div class="controls">
+    <div class="slider-box">
+      <span>Высота (h): <b id="valH" style="color:#c084fc;">20 см</b></span>
+      <input type="range" id="rangeH" min="5" max="35" step="1" value="20">
+    </div>
+
+    <div class="res-box">
+      Дальность (L): <span id="valL">—</span>
+    </div>
+
+    <button id="btnLaunch">🚀 Пустить шарик</button>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const rangeH = document.getElementById('rangeH');
+  const valH = document.getElementById('valH');
+  const valL = document.getElementById('valL');
+  const btnLaunch = document.getElementById('btnLaunch');
+
+  let hVal = 20;
+  let finalL = null;
+  let rolling = false;
+
+  const ballRadius = 8;
+  let ball = { x: 0, y: 0 };
+  let path = [];
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.resetTransform();
+    ctx.scale(dpr, dpr);
+    render();
+  }
+  window.addEventListener('resize', resize);
+
+  // Математическая функция траектории поверхности желоба
+  function getChuteY(x, standX, chuteStartY, exitX, trackY) {
+    const flatLength = 40; // длина строго горизонтального участка перед срезом
+    const curveEndX = exitX - flatLength;
+
+    if (x >= curveEndX) {
+      return trackY; // на горизонтальном участке y строго константа
+    }
+    if (x <= standX) {
+      return chuteStartY;
+    }
+    // Квадратичное плавное сопряжение: в точке curveEndX производная строго 0
+    const t = (x - standX) / (curveEndX - standX);
+    return chuteStartY + (trackY - chuteStartY) * (2 * t - t * t);
+  }
+
+  function render() {
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    ctx.clearRect(0, 0, w, h);
+
+    const floorY = h - 35;
+    const tableX = 180;
+    const tableY = floorY - 130;
+
+    // 1. Пол
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillRect(0, floorY, w, 35);
+    ctx.fillStyle = '#64748b';
+    ctx.fillRect(0, floorY, w, 3);
+
+    // 2. Стол
+    ctx.fillStyle = '#64748b';
+    ctx.fillRect(15, tableY, tableX - 15, floorY - tableY);
+    ctx.fillStyle = '#475569';
+    ctx.fillRect(10, tableY - 4, tableX - 10, 8);
+
+    // 3. Вертикальная линейка
+    const rulerX = 40;
+    const rulerH = 150;
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(rulerX, tableY - rulerH, 22, rulerH);
+    ctx.strokeStyle = '#a16207';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(rulerX, tableY - rulerH, 22, rulerH);
+
+    ctx.fillStyle = '#713f12';
+    ctx.font = '700 8px sans-serif';
+    for (let cm = 0; cm <= 35; cm += 5) {
+      let py = tableY - (cm / 35) * (rulerH - 12);
+      ctx.beginPath();
+      ctx.moveTo(rulerX + 22, py);
+      ctx.lineTo(rulerX + 13, py);
+      ctx.stroke();
+      ctx.fillText(cm, rulerX + 2, py + 3);
+    }
+    ctx.fillText('h, см', rulerX + 1, tableY - rulerH - 4);
+
+    // 4. Штатив с муфтой
+    const standX = 75;
+    ctx.fillStyle = '#334155';
+    ctx.fillRect(standX - 2.5, tableY - rulerH - 15, 5, rulerH + 15);
+
+    const chuteStartY = tableY - (hVal / 35) * (rulerH - 12);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(standX - 6, chuteStartY - 6, 12, 12);
+
+    // 5. Желоб — точная отрисовка по точкам
+    const exitX = tableX;
+    const trackY = tableY;
+
+    ctx.beginPath();
+    ctx.moveTo(standX, chuteStartY);
+    for (let px = standX; px <= exitX; px += 2) {
+      ctx.lineTo(px, getChuteY(px, standX, chuteStartY, exitX, trackY));
+    }
+    ctx.strokeStyle = '#64748b';
+    ctx.lineWidth = 5;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(standX, chuteStartY - 1);
+    for (let px = standX; px <= exitX; px += 2) {
+      ctx.lineTo(px, getChuteY(px, standX, chuteStartY, exitX, trackY) - 1);
+    }
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // 6. Напольная линейка
+    const rulerL_W = w - exitX - 15;
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(exitX, floorY - 14, rulerL_W, 14);
+    ctx.strokeStyle = '#a16207';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(exitX, floorY - 14, rulerL_W, 14);
+
+    const scaleCm = rulerL_W / 85;
+    ctx.fillStyle = '#713f12';
+    ctx.font = '700 8px sans-serif';
+    for (let cm = 0; cm <= 85; cm += 5) {
+      let px = exitX + cm * scaleCm;
+      if (px > exitX + rulerL_W) break;
+      ctx.beginPath();
+      ctx.moveTo(px, floorY - 14);
+      ctx.lineTo(px, floorY - 7);
+      ctx.stroke();
+      if (cm % 10 === 0) ctx.fillText(cm, px - 5, floorY - 2);
+    }
+
+    // Траектория падения
+    if (path.length > 1) {
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = '#8b5cf6';
+      ctx.lineWidth = 2;
+      ctx.moveTo(path[0].x, path[0].y);
+      for (let p of path) ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Флажок места приземления
+    if (finalL !== null) {
+      let markX = exitX + finalL * scaleCm;
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(markX - 1, floorY - 24, 2, 24);
+      ctx.beginPath();
+      ctx.moveTo(markX + 1, floorY - 24);
+      ctx.lineTo(markX + 14, floorY - 18);
+      ctx.lineTo(markX + 1, floorY - 12);
+      ctx.fill();
+
+      ctx.font = '800 11px system-ui';
+      ctx.fillStyle = '#b91c1c';
+      ctx.textAlign = 'center';
+      ctx.fillText(`L = ${finalL} см`, markX, floorY - 28);
+    }
+
+    // 7. Шарик
+    let bx = standX;
+    let by = chuteStartY - ballRadius;
+    if (rolling || finalL !== null) {
+      bx = ball.x;
+      by = ball.y;
+    }
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(bx, by, ballRadius, 0, Math.PI * 2);
+    let grad = ctx.createRadialGradient(bx - 2.5, by - 3, 1, bx, by, ballRadius);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.35, '#cbd5e1');
+    grad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  rangeH.oninput = () => {
+    hVal = parseFloat(rangeH.value);
+    valH.innerText = hVal + ' см';
+    if (!rolling) {
+      finalL = null;
+      valL.innerText = '—';
+      path = [];
+      render();
+    }
+  };
+
+  btnLaunch.onclick = () => {
+    if (rolling) return;
+    rolling = true;
+    btnLaunch.disabled = true;
+    finalL = null;
+    path = [];
+
+    const w = canvas.getBoundingClientRect().width;
+    const h = canvas.getBoundingClientRect().height;
+    const floorY = h - 35;
+    const tableX = 180;
+    const tableY = floorY - 130;
+    const rulerH = 150;
+    const standX = 75;
+    const chuteStartY = tableY - (hVal / 35) * (rulerH - 12);
+    const exitX = tableX;
+    const trackY = tableY;
+
+    // Расчёт дальности L ~ sqrt(h)
+    const calculatedL = Number((Math.sqrt(hVal) * 11.5 + (Math.random() - 0.5) * 1.5).toFixed(1));
+    const rulerL_W = w - exitX - 15;
+    const scaleCm = rulerL_W / 85;
+    const targetX = exitX + calculatedL * scaleCm;
+
+    // Начальные координаты
+    let curX = standX;
+    let curY = chuteStartY - ballRadius;
+    let vx = 1.0;
+    let vy = 0.0;
+    let onChute = true;
+
+    // Время свободного падения: ~24 кадра при 60 FPS
+    const flightFrames = 25;
+    const exitVx = (targetX - exitX) / flightFrames;
+    const gravity = (2 * (floorY - ballRadius - (trackY - ballRadius))) / (flightFrames * flightFrames);
+
+    function step() {
+      if (onChute) {
+        // Ускорение по желобу
+        vx += 0.28;
+        curX += vx;
+
+        if (curX >= exitX) {
+          // Строгий момент схода со стола:
+          // X ровно на срезе стола
+          curX = exitX;
+          // Y ровно на высоте качения
+          curY = trackY - ballRadius;
+          // Вертикальная скорость СТРОГО ноль — никакого подпрыгивания!
+          vy = 0.0;
+          vx = exitVx;
+          onChute = false;
+        } else {
+          curY = getChuteY(curX, standX, chuteStartY, exitX, trackY) - ballRadius;
+        }
+
+        ball.x = curX;
+        ball.y = curY;
+        render();
+        requestAnimationFrame(step);
+      } else {
+        // Свободный полёт по чистой физике:
+        // x увеличивается равномерно, y ускоряется ИСКЛЮЧИТЕЛЬНО ВНИЗ
+        curX += vx;
+        vy += gravity;
+        curY += vy;
+
+        if (curY >= floorY - ballRadius) {
+          // Коснулся пола
+          curY = floorY - ballRadius;
+          ball.x = targetX;
+          ball.y = curY;
+          finalL = calculatedL;
+          valL.innerText = finalL + ' см';
+          rolling = false;
+          btnLaunch.disabled = false;
+          render();
+        } else {
+          ball.x = curX;
+          ball.y = curY;
+          path.push({ x: curX, y: curY });
+          render();
+          requestAnimationFrame(step);
+        }
+      }
+    }
+
+    requestAnimationFrame(step);
+  };
+
+  setTimeout(resize, 50);
+</script>
+
+</body>
+  </html>
+  
